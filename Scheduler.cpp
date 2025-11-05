@@ -6,9 +6,28 @@
 //
 
 #include "Scheduler.hpp"
+#include <algorithm>
+#include <map>
 
 static bool migrating = false;
-static unsigned active_machines = 16;
+//static unsigned active_machines = 16;
+//tasks that need to still be done on sleeping machines
+static std::map<MachineId_t, std::vector<TaskId_t>> pendingTasks;
+
+struct VMInfoWrapper {
+    VMId_t id;
+    MachineId_t machine;
+    CPUType_t cpu;
+    unsigned numActiveTasks;
+};
+
+static Scheduler Scheduler;
+
+double getUtilization(MachineId_t machineId)
+{
+    MachineInfo_t info = Machine_GetInfo(machineId);
+    return (double) info.active_tasks/info.num_cpus;
+}
 
 void Scheduler::Init() {
     // Find the parameters of the clusters
@@ -19,31 +38,35 @@ void Scheduler::Init() {
     //      Get the number of CPUs
     //      Get if there is a GPU or not
     // 
-    SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
-    SimOutput("Scheduler::Init(): Initializing scheduler", 1);
-    for(unsigned i = 0; i < active_machines; i++)
-        vms.push_back(VM_Create(LINUX, X86));
-    for(unsigned i = 0; i < active_machines; i++) {
+    SimOutput("Scheduler::Init(): Initializing greedy scheduler", 1);
+
+    unsigned totalMachines = Machine_GetTotal();
+    SimOutput("Scheduler::Init(): Total number of machines is " + std::to_string(totalMachines), 3);
+
+    for(unsigned i = 0; i < totalMachines; i++)
+    {
         machines.push_back(MachineId_t(i));
-    }    
-    for(unsigned i = 0; i < active_machines; i++) {
-        VM_Attach(vms[i], machines[i]);
     }
 
-    bool dynamic = false;
-    if(dynamic)
-        for(unsigned i = 0; i<4 ; i++)
-            for(unsigned j = 0; j < 8; j++)
-                Machine_SetCorePerformance(MachineId_t(0), j, P3);
-    // Turn off the ARM machines
-    for(unsigned i = 24; i < Machine_GetTotal(); i++)
-        Machine_SetState(MachineId_t(i), S5);
+    for(unsigned i = 0; i < 16; i++)
+    {
+        if(Machine_GetCPUType(MachineId_t(i)) == X86)
+        {
+            VMId_t vm = VM_Create(LINUX, X86);
+            vms.push_back(vm);
+            VM_Attach(vm, MachineId_t(i));
+        }
+    }
 
-    SimOutput("Scheduler::Init(): VM ids are " + to_string(vms[0]) + " ahd " + to_string(vms[1]), 3);
+    for(unsigned i = 16; i < totalMachines; i++)
+    {
+        Machine_SetState(MachineId_t(i), S5);
+    }
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     // Update your data structure. The VM now can receive new tasks
+    migrating = false;
 }
 
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
@@ -64,14 +87,98 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Turn on a machine, migrate an existing VM from a loaded machine....
     //
     // Other possibilities as desired
-    Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
+    /*Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
     if(migrating) {
         VM_AddTask(vms[0], task_id, priority);
     }
     else {
         VM_AddTask(vms[task_id % active_machines], task_id, priority);
-    }// Skeleton code, you need to change it according to your algorithm
+    }// Skeleton code, you need to change it according to your algorithm*/
+
+    CPUType_t CPUreq = RequiredCPUType(task_id);
+    unsigned memNeeded = GetTaskMemory(task_id);
+    SLAType_t slaType = RequiredSLA(task_id);
+
+    Priority_t priority;
+    switch (slaType)
+    {
+        case SLA0: priority = HIGH_PRIORITY; break;
+        case SLA1: priority = MID_PRIORITY; break;
+        case SLA2: priority = LOW_PRIORITY; break;
+        case SLA3: priority = LOW_PRIORITY; break;
+        default: priority = LOW_PRIORITY; break;
+    }
+
+    std::vector<MachineId_t> matchingMachines;
+    for(MachineId_t machineId : machines)
+    {
+        MachineInfo_t info = Machine_GetInfo(machineId);
+        //does order matter???
+        if(info.s_state == S0 && Machine_GetCPUType(machineId) == CPUreq && info.memory_size - info.memory_used >= memNeeded)
+        {
+            matchingMachines.push_back(machineId);
+        }
+    }
+
+    bool compareMachinesUtil(MachineId_t a, MachineId_t b)
+    {
+        return getUtilization(a) < getUtilization(b);
+    }
+
+    std::sort(matchingMachines.begin(), matchingMachines.end(), compareMachinesUtil);
+
+    bool assigned = false;
+    for (MachineId_t machineId : matchingMachines)
+    {
+        for (VMId_t vmId : vms)
+        {
+            VMInfo_t vmInfo = VM_GetInfo(vmId);
+            if(vmInfo.machine_id == machineId && vmInfo.cpu == CPUreq)
+            {
+                VM_AddTask(vmId, task_id, priority);
+                assigned = true;
+                //SIMOUTPUT HERE 
+                break;
+            }
+        }
+        if(assigned)
+        {
+            break;
+        } 
+    }
+
+    if(!assigned && !matchingMachines.empty()) 
+    {
+        VMId_t newVm = VM_Create(RequiredVMType(task_id), CPUreq);
+        VM_Attach(newVm, matchingMachines[0]);
+        VM_AddTask(newVm, task_id, priority);
+        vms.push_back(newVm);
+        assigned = true;
+        //SimOutput("Created new VM " + std::to_string(newVm) + " for task " + std::to_string(task_id) + " on machine " + std::to_string(matchingMachines[0]), 2);
+    }
+
+    if(!assigned) 
+    {
+        for(MachineId_t machineId : machines) 
+        {
+            MachineInfo_t info = Machine_GetInfo(machineId);
+            if(info.s_state == S5 && Machine_GetCPUType(machineId) == CPUreq) 
+            {
+                Machine_SetState(machineId, S0);
+                pendingTasks[machineId].push_back(task_id);
+                assigned = true;
+                //SimOutput("Waking up machine " + std::to_string(machineId) + " for task " + std::to_string(task_id), 1);
+                break;
+            }
+        }
+    }
+
+    if(!assigned) 
+    {
+        SimOutput("WARNING: Could not assign task " + std::to_string(task_id), 0);
+    }
 }
+
 
 void Scheduler::PeriodicCheck(Time_t now) {
     // This method should be called from SchedulerCheck()
@@ -100,8 +207,6 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
 }
 
 // Public interface below
-
-static Scheduler Scheduler;
 
 void InitScheduler() {
     SimOutput("InitScheduler(): Initializing scheduler", 4);

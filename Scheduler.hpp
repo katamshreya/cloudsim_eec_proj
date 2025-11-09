@@ -11,9 +11,19 @@
 
 
 #include <vector>
-#include <unordered_map>
+#include <queue>
+
+
 #include "Interfaces.h"
-#include <map>
+#include <unordered_map>
+#include <set>
+
+
+struct CompareMachineEnergy {
+   bool operator()(const MachineId_t& a, const MachineId_t& b) const {
+       return Machine_GetEnergy(a) > Machine_GetEnergy(b); // min-heap: smaller priority comes first
+   }
+};
 
 
 class Scheduler {
@@ -25,24 +35,24 @@ public:
    void PeriodicCheck(Time_t now);
    void Shutdown(Time_t now);
    void TaskComplete(Time_t now, TaskId_t task_id);
+   void StateChangeComplete(Time_t now, MachineId_t machine_id);
+
 private:
-   struct PendingVM {
-       VMType_t vmType;
-       CPUType_t cpu;
-       TaskId_t taskId;
-       Priority_t priority;
-   };
    vector<VMId_t> vms;
    vector<MachineId_t> machines;
-   std::unordered_map<MachineId_t, unsigned> machineLoad;
-   std::unordered_map<TaskId_t, VMId_t> taskToVM;
-   map<MachineId_t, PendingVM> pendingVMs;
-
-
-
+   
+   //needed AI to see how to declare a hashmap in C++ 
+   std::unordered_map<VMId_t, MachineId_t> vm_to_machine;
+   std::set<MachineId_t> powered;
+   VMType_t GetDefaultVMForCPU(CPUType_t cpu_type);
+   
 
 };
 
-#endif /* Scheduler_hpp */
 
+
+
+
+
+#endif /* Scheduler_hpp */
 

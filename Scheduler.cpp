@@ -12,7 +12,6 @@
 #include <cmath>
 
 static bool migrating = false;
-static unsigned active_machines = 16;
 
 void Scheduler::Init()
 {
@@ -24,73 +23,35 @@ void Scheduler::Init()
         MachineInfo_t m_info = Machine_GetInfo(i);
 
         if (m_info.s_state != S0)
-            continue; // only powered-on machines
+            continue;
 
         machines.push_back(i);
-        powered.insert(i);
+        VMId_t vm_linux = VM_Create(LINUX, m_info.cpu);
+        VM_Attach(vm_linux, i);
+        vms.push_back(vm_linux);
 
-        std::vector<VMType_t> vm_types_to_create;
-
-        switch (m_info.cpu)
+        // Extra VM types if needed
+        if (m_info.cpu == X86 && m_info.gpus)
         {
-        case X86:
-            vm_types_to_create.push_back(LINUX);
-            if (m_info.gpus)
-                vm_types_to_create.push_back(LINUX_RT);
-            break;
-        case POWER:
-            vm_types_to_create.push_back(LINUX);
-            vm_types_to_create.push_back(AIX);
-            break;
-        case ARM:
-        case RISCV:
-            vm_types_to_create.push_back(LINUX);
-            break;
-        default:
-            continue; // unknown CPU, skip
+            VMId_t vm_linux_rt = VM_Create(LINUX_RT, m_info.cpu);
+            VM_Attach(vm_linux_rt, i);
+            vms.push_back(vm_linux_rt);
         }
 
-        for (auto vm_type : vm_types_to_create)
+        if (m_info.cpu == POWER)
         {
-            if (m_info.memory_size < VM_MEMORY_OVERHEAD)
-                continue;
-
-            VMId_t vm = VM_Create(vm_type, m_info.cpu);
-            VM_Attach(vm, i);
-
-            vms.push_back(vm);
-            vm_to_machine[vm] = i;
-
-            SimOutput("Scheduler::Init(): Created VM type " + to_string(vm_type) +
-                          " on machine " + to_string(i),
-                      2);
+            VMId_t vm_aix = VM_Create(AIX, m_info.cpu);
+            VM_Attach(vm_aix, i);
+            vms.push_back(vm_aix);
         }
+
+        SimOutput("Scheduler::Init(): Total active machines: " + to_string(machines.size()), 2);
     }
-
-    SimOutput("Scheduler::Init(): Total active machines: " + to_string(machines.size()), 2);
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id)
 {
-    // Update your data structure. The VM now can receive new tasks
-    VMInfo_t vm_info = VM_GetInfo(vm_id);
-    MachineId_t new_machine = vm_info.machine_id;
-
-    // Update internal mapping of VM to machine
-    vm_to_machine[vm_id] = new_machine;
-
-    // Make sure the machine is marked as powered on
-    powered.insert(new_machine);
-
-    // Optionally, update machine utilization for monitoring/logging
-    MachineInfo_t m_info = Machine_GetInfo(new_machine);
-    double util = (m_info.num_cpus == 0) ? 1.0
-                                         : double(m_info.active_tasks) / double(m_info.num_cpus);
-
-    SimOutput("MigrationComplete(): VM " + to_string(vm_id) +
-                  " successfully migrated to machine " + to_string(new_machine) +
-                  " (util=" + to_string(util) + ")",
-              2);
+    migrating = false;
 }
 
 void Scheduler::NewTask(Time_t now, TaskId_t task_id)
@@ -108,6 +69,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
     double min_util = DBL_MAX;
 
     // Step 1: Try to assign to existing VM
+
     for (VMId_t vm : vms)
     {
         VMInfo_t vm_info = VM_GetInfo(vm);
@@ -121,11 +83,10 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
             continue;
 
         unsigned available_memory = m_info.memory_size - m_info.memory_used;
-        if (available_memory < task_info.required_memory + VM_MEMORY_OVERHEAD)
+        if (available_memory < task_info.required_memory)
             continue;
 
-        double util = (m_info.num_cpus == 0) ? 1.0
-                                             : double(m_info.active_tasks) / double(m_info.num_cpus);
+        double util = (m_info.num_cpus == 0) ? 1.0 : double(m_info.active_tasks) / double(m_info.num_cpus);
 
         if (util < min_util)
         {
@@ -154,7 +115,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         if (m_info.cpu != task_info.required_cpu)
             continue;
         unsigned available_memory = m_info.memory_size - m_info.memory_used;
-        if (available_memory < task_info.required_memory + VM_MEMORY_OVERHEAD)
+        if (available_memory < task_info.required_memory)
             continue;
 
         double util = (m_info.num_cpus == 0) ? 1.0
@@ -181,9 +142,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
     }
 
     // Step 3: Wake sleeping machine immediately for HIGH_PRIORITY
-    if (priority == HIGH_PRIORITY)
-    {
-        for (unsigned i = 0; i < Machine_GetTotal(); i++)
+    for (unsigned i = 0; i < Machine_GetTotal(); i++)
         {
             MachineInfo_t m_info = Machine_GetInfo(i);
             if (m_info.s_state != S5)
@@ -194,7 +153,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
             Machine_SetState(i, S0);
             VMId_t new_vm = VM_Create(task_info.required_vm, task_info.required_cpu);
             VM_Attach(new_vm, i);
-            VM_AddTask(new_vm, task_id, HIGH_PRIORITY);
+            VM_AddTask(new_vm, task_id, priority);
             vms.push_back(new_vm);
 
             bool found = false;
@@ -214,10 +173,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
                       2);
             return;
         }
-    }
 
     // Step 4: Still nothing? Put in pending_tasks
-    pending_tasks.push_back(task_id);
     SimOutput("NewTask(): No placement found for task " + to_string(task_id), 1);
 }
 
@@ -237,79 +194,6 @@ void Scheduler::PeriodicCheck(Time_t now)
     {
         Machine_SetState(idle, S5);
         SimOutput("PeriodicCheck(): Powered down idle machine " + to_string(idle), 2);
-    }
-
-    // Handle pending tasks aggressively
-    for (auto it = pending_tasks.begin(); it != pending_tasks.end();)
-    {
-        TaskId_t task_id = *it;
-        TaskInfo_t task_info = GetTaskInfo(task_id);
-        bool scheduled = false;
-
-        // Try existing VMs
-        for (VMId_t vm : vms)
-        {
-            VMInfo_t vm_info = VM_GetInfo(vm);
-            MachineInfo_t m_info = Machine_GetInfo(vm_info.machine_id);
-
-            if (m_info.s_state != S0)
-                continue;
-            if (vm_info.vm_type != task_info.required_vm)
-                continue;
-            if (m_info.cpu != task_info.required_cpu)
-                continue;
-
-            unsigned avail_mem = m_info.memory_size - m_info.memory_used;
-            if (avail_mem < task_info.required_memory + VM_MEMORY_OVERHEAD)
-                continue;
-
-            VM_AddTask(vm, task_id, HIGH_PRIORITY);
-            scheduled = true;
-            SimOutput("PeriodicCheck(): Assigned pending task " + to_string(task_id) +
-                          " to VM " + to_string(vm),
-                      2);
-            break;
-        }
-
-        // If still unscheduled, wake sleeping machines
-        if (!scheduled)
-        {
-            for (unsigned i = 0; i < Machine_GetTotal(); i++)
-            {
-                MachineInfo_t m_info = Machine_GetInfo(i);
-                if (m_info.s_state != S5 || m_info.cpu != task_info.required_cpu)
-                    continue;
-
-                Machine_SetState(i, S0);
-                VMId_t new_vm = VM_Create(task_info.required_vm, task_info.required_cpu);
-                VM_Attach(new_vm, i);
-                VM_AddTask(new_vm, task_id, HIGH_PRIORITY);
-                vms.push_back(new_vm);
-
-                bool found = false;
-                for (auto m : machines)
-                {
-                    if (m == i)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found)
-                    machines.push_back(i);
-
-                SimOutput("PeriodicCheck(): Powered on sleeping machine " + to_string(i) +
-                              " for pending task " + to_string(task_id),
-                          2);
-                scheduled = true;
-                break;
-            }
-        }
-
-        if (scheduled)
-            it = pending_tasks.erase(it);
-        else
-            ++it;
     }
 }
 
@@ -374,7 +258,6 @@ void MigrationDone(Time_t time, VMId_t vm_id)
     // The function is called on to alert you that migration is complete
     SimOutput("MigrationDone(): Migration of VM " + to_string(vm_id) + " was completed at time " + to_string(time), 4);
     Scheduler.MigrationComplete(time, vm_id);
-    migrating = false;
 }
 
 void SchedulerCheck(Time_t time)

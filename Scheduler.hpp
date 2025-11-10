@@ -45,6 +45,7 @@ private:
    std::unordered_map<VMId_t, MachineId_t> vm_to_machine;
    std::set<MachineId_t> powered;
    VMType_t GetDefaultVMForCPU(CPUType_t cpu_type);
+   std::vector<TaskId_t> pending_tasks;
    
 
 };

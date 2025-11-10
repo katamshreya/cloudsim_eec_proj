@@ -41,7 +41,6 @@ private:
    vector<VMId_t> vms;
    vector<MachineId_t> machines;
    
-   //needed AI to see how to declare a hashmap in C++ 
    std::unordered_map<VMId_t, MachineId_t> vm_to_machine;
    std::set<MachineId_t> powered;
    VMType_t GetDefaultVMForCPU(CPUType_t cpu_type);

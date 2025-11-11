@@ -9,7 +9,8 @@
 #define Scheduler_hpp
 
 #include <vector>
-
+#include <unordered_set>
+#include <unordered_map>
 #include "Interfaces.h"
 
 class Scheduler {
@@ -21,9 +22,14 @@ public:
     void PeriodicCheck(Time_t now);
     void Shutdown(Time_t now);
     void TaskComplete(Time_t now, TaskId_t task_id);
+    void ChangeComplete(Time_t time, MachineId_t machine_id);
+    void HandleMemoryWarning(Time_t now, MachineId_t machine_id);
 private:
     vector<VMId_t> vms;
     vector<MachineId_t> machines;
+
+    std::unordered_set<MachineId_t> quarantined;
+    std::unordered_map<MachineId_t, Time_t> last_mem_warn;
 };
 
 

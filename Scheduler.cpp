@@ -9,7 +9,6 @@
 
 static bool migrating = false;
 
-// ----------------- small helpers -----------------
 VMType_t Scheduler::defaultVM(CPUType_t cpu) {
     switch (cpu) {
         case X86:   return LINUX;
@@ -71,7 +70,6 @@ void Scheduler::drainQueue(const VirtualKey& key) {
     }
 }
 
-// ----------------- core lifecycle -----------------
 void Scheduler::Init() {
     unsigned total = Machine_GetTotal();
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(total), 3);

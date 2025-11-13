@@ -134,6 +134,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         return;
     }
 
+    //place on a new VM on an active machine, machine with lowest utilization
     double lowest_util = DBL_MAX;
     MachineId_t best_machine = -1;
     for (MachineId_t machine_id : machines)

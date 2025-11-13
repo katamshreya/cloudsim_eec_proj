@@ -15,8 +15,17 @@ static bool migrating = false;
 
 void Scheduler::Init()
 {
+    // Find the parameters of the clusters
+    // Get the total number of machines
+    // For each machine:
+    //      Get the type of the machine
+    //      Get the memory of the machine
+    //      Get the number of CPUs
+    //      Get if there is a GPU or not
+    //
     unsigned total_machines = Machine_GetTotal();
-    SimOutput("Scheduler::Init(): Total machines = " + to_string(total_machines), 2);
+    SimOutput("Scheduler::Init(): Total machines = " + 
+        to_string(total_machines), 2);
 
     for (unsigned i = 0; i < total_machines; i++)
     {
@@ -45,7 +54,8 @@ void Scheduler::Init()
             vms.push_back(vm_aix);
         }
 
-        SimOutput("Scheduler::Init(): Total active machines: " + to_string(machines.size()), 2);
+        SimOutput("Scheduler::Init(): Total active machines: " + 
+            to_string(machines.size()), 2);
     }
 }
 
@@ -56,6 +66,24 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id)
 
 void Scheduler::NewTask(Time_t now, TaskId_t task_id)
 {
+    // Get the task parameters
+    //  IsGPUCapable(task_id);
+    //  GetMemory(task_id);
+    //  RequiredVMType(task_id);
+    //  RequiredSLA(task_id);
+    //  RequiredCPUType(task_id);
+    // Decide to attach the task to an existing VM,
+    //      vm.AddTask(taskid, Priority_T priority); or
+    // Create a new VM, attach the VM to a machine
+    //      VM vm(type of the VM)
+    //      vm.Attach(machine_id);
+    //      vm.AddTask(taskid, Priority_t priority) or
+    // Turn on a machine, create a new VM, attach it to the VM, then add the task
+    //
+    // Turn on a machine, migrate an existing VM from a loaded machine....
+    //
+    // Other possibilities as desired
+
     TaskInfo_t task_info = GetTaskInfo(task_id);
     Priority_t priority;
     if (task_info.required_sla == SLA0 || task_info.required_sla == SLA1)
@@ -68,13 +96,13 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
     VMId_t vm_selected = -1;
     double min_util = DBL_MAX;
 
-    // Step 1: Try to assign to existing VM
-
+    // selecting VM
     for (VMId_t vm : vms)
     {
         VMInfo_t vm_info = VM_GetInfo(vm);
         MachineInfo_t m_info = Machine_GetInfo(vm_info.machine_id);
 
+        // Check if the VM can host the task
         if (m_info.s_state != S0)
             continue;
         if (vm_info.vm_type != task_info.required_vm)
@@ -86,7 +114,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         if (available_memory < task_info.required_memory)
             continue;
 
-        double util = (m_info.num_cpus == 0) ? 1.0 : double(m_info.active_tasks) / double(m_info.num_cpus);
+        //utilization to make algorithm more robust
+        double util = (m_info.num_cpus == 0) ? 1.0 : 
+        double(m_info.active_tasks) / double(m_info.num_cpus);
 
         if (util < min_util)
         {
@@ -104,7 +134,6 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         return;
     }
 
-    // Step 2: Try active machines for a new VM
     double lowest_util = DBL_MAX;
     MachineId_t best_machine = -1;
     for (MachineId_t machine_id : machines)
@@ -119,7 +148,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
             continue;
 
         double util = (m_info.num_cpus == 0) ? 1.0
-                                             : double(m_info.active_tasks) / double(m_info.num_cpus);
+                                             : double(m_info.active_tasks) 
+                                             / double(m_info.num_cpus);
         if (util < lowest_util)
         {
             lowest_util = util;
@@ -129,7 +159,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
 
     if (best_machine != MachineId_t(-1))
     {
-        VMId_t new_vm = VM_Create(task_info.required_vm, task_info.required_cpu);
+        VMId_t new_vm = VM_Create(task_info.required_vm, 
+            task_info.required_cpu);
         VM_Attach(new_vm, best_machine);
         VM_AddTask(new_vm, task_id, priority);
         vms.push_back(new_vm);
@@ -141,41 +172,42 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         return;
     }
 
-    // Step 3: Wake sleeping machine immediately for HIGH_PRIORITY
     for (unsigned i = 0; i < Machine_GetTotal(); i++)
+    {
+        MachineInfo_t m_info = Machine_GetInfo(i);
+        if (m_info.s_state != S5)
+            continue;
+        if (m_info.cpu != task_info.required_cpu)
+            continue;
+
+        Machine_SetState(i, S0);
+        VMId_t new_vm = VM_Create(task_info.required_vm, 
+            task_info.required_cpu);
+        VM_Attach(new_vm, i);
+        VM_AddTask(new_vm, task_id, priority);
+        vms.push_back(new_vm);
+
+        bool found = false;
+        for (auto m : machines)
         {
-            MachineInfo_t m_info = Machine_GetInfo(i);
-            if (m_info.s_state != S5)
-                continue;
-            if (m_info.cpu != task_info.required_cpu)
-                continue;
-
-            Machine_SetState(i, S0);
-            VMId_t new_vm = VM_Create(task_info.required_vm, task_info.required_cpu);
-            VM_Attach(new_vm, i);
-            VM_AddTask(new_vm, task_id, priority);
-            vms.push_back(new_vm);
-
-            bool found = false;
-            for (auto m : machines)
+            if (m == i)
             {
-                if (m == i)
-                {
-                    found = true;
-                    break;
-                }
+                found = true;
+                break;
             }
-            if (!found)
-                machines.push_back(i);
-
-            SimOutput("NewTask(): Powered on sleeping machine " + to_string(i) +
-                          " for SLA0 task " + to_string(task_id),
-                      2);
-            return;
         }
+        if (!found)
+            machines.push_back(i);
 
-    // Step 4: Still nothing? Put in pending_tasks
-    SimOutput("NewTask(): No placement found for task " + to_string(task_id), 1);
+        SimOutput("NewTask(): Powered on sleeping machine " + to_string(i) +
+                      " for SLA0 task " + to_string(task_id),
+                  2);
+        return;
+    }
+
+    // Still nothing
+    SimOutput("NewTask(): No placement found for task " + 
+        to_string(task_id), 1);
 }
 
 void Scheduler::PeriodicCheck(Time_t now)
@@ -193,7 +225,8 @@ void Scheduler::PeriodicCheck(Time_t now)
     for (MachineId_t idle : idleMachines)
     {
         Machine_SetState(idle, S5);
-        SimOutput("PeriodicCheck(): Powered down idle machine " + to_string(idle), 2);
+        SimOutput("PeriodicCheck(): Powered down idle machine " + 
+            to_string(idle), 2);
     }
 }
 

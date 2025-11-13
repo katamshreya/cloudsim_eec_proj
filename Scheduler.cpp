@@ -16,7 +16,9 @@ static bool migrating = false;
 void Scheduler::Init()
 {
     unsigned total_machines = Machine_GetTotal();
-    SimOutput("Scheduler::Init(): Total machines = " + to_string(total_machines), 2);
+    SimOutput("Scheduler::Init(): Total machines = " + 
+        
+        to_string(total_machines), 2);
 
     for (unsigned i = 0; i < total_machines; i++)
     {
@@ -30,7 +32,6 @@ void Scheduler::Init()
         VM_Attach(vm_linux, i);
         vms.push_back(vm_linux);
 
-        // Extra VM types if needed
         if (m_info.cpu == X86 && m_info.gpus)
         {
             VMId_t vm_linux_rt = VM_Create(LINUX_RT, m_info.cpu);
@@ -45,7 +46,8 @@ void Scheduler::Init()
             vms.push_back(vm_aix);
         }
 
-        SimOutput("Scheduler::Init(): Total active machines: " + to_string(machines.size()), 2);
+        SimOutput("Scheduler::Init(): Total active machines: " + 
+            to_string(machines.size()), 2);
     }
 }
 
@@ -72,14 +74,15 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
     unsigned total_vms = vms.size();
     unsigned total_machines = Machine_GetTotal();
 
-    // Step 1: Try existing VMs in round-robin
+    //existing vms
     for (size_t i = 0; i < total_vms; ++i)
     {
         VMId_t vm_id = vms[(vm_rr + i) % total_vms];
         VMInfo_t vm_info = VM_GetInfo(vm_id);
         MachineInfo_t m_info = Machine_GetInfo(vm_info.machine_id);
 
-        if (m_info.s_state != S0 || vm_info.vm_type != task_info.required_vm || m_info.cpu != task_info.required_cpu)
+        if (m_info.s_state != S0 || vm_info.vm_type != task_info.required_vm 
+            || m_info.cpu != task_info.required_cpu)
             continue;
 
         unsigned available_memory = m_info.memory_size - m_info.memory_used;
@@ -92,7 +95,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         return;
     }
 
-    // Step 2: Try active machines to create a new VM
+    //active machines, place VM
     for (size_t i = 0; i < total_machines; ++i)
     {
         MachineId_t machine_id = MachineId_t((machine_rr + i) % total_machines);
@@ -109,7 +112,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         for (VMId_t vm_id : vms)
         {
             VMInfo_t vm_info = VM_GetInfo(vm_id);
-            if (vm_info.machine_id == machine_id && vm_info.vm_type == task_info.required_vm)
+            if (vm_info.machine_id == machine_id && vm_info.vm_type 
+                == task_info.required_vm)
             {
                 selected_vm = vm_id;
                 found_vm = true;
@@ -120,7 +124,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         // Create VM if not found
         if (!found_vm)
         {
-            selected_vm = VM_Create(task_info.required_vm, task_info.required_cpu);
+            selected_vm = VM_Create(task_info.required_vm, 
+                task_info.required_cpu);
             VM_Attach(selected_vm, machine_id);
             vms.push_back(selected_vm);
             SimOutput("NewTask(): Created VM " + to_string(selected_vm) +
@@ -133,7 +138,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         return;
     }
 
-    // Step 3: Wake sleeping machine
+    // Wake sleeping machine
     for (size_t i = 0; i < total_machines; ++i)
     {
         MachineId_t machine_id = MachineId_t((machine_rr + i) % total_machines);
@@ -145,6 +150,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         if (available_memory < task_info.required_memory + VM_MEMORY_OVERHEAD)
             continue;
 
+        //on   
         Machine_SetState(machine_id, S0);
 
         selected_vm = VM_Create(task_info.required_vm, task_info.required_cpu);
@@ -152,28 +158,15 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         VM_AddTask(selected_vm, task_id, priority);
         vms.push_back(selected_vm);
 
-        // Ensure machine is in the active machine list
-        bool found = false;
-        for (auto m : machines)
-        {
-            if (m == machine_id)
-            {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            machines.push_back(machine_id);
-
         machine_rr = (machine_rr + i + 1) % total_machines;
-        SimOutput("NewTask(): Powered on sleeping machine " + to_string(machine_id) +
+        SimOutput("NewTask(): Powered on sleeping machine " + 
+            to_string(machine_id) +
                       " for task " + to_string(task_id),
                   2);
         return;
     }
-
-    // Step 4: No placement found
-    SimOutput("NewTask(): No placement found for task " + to_string(task_id), 1);
+    SimOutput("NewTask(): No placement found for task " + 
+        to_string(task_id), 1);
 }
 
 

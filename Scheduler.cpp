@@ -22,8 +22,6 @@ using std::vector;
 static bool migrating = false;
 static unsigned active_machines = 16;
 
-
-// ---- Internal Data Structures ---- //
 struct VMRecord {
    set<TaskId_t> active_tasks;
    MachineId_t host_machine;
@@ -49,14 +47,11 @@ unsigned completed_tasks = 0;
 const unsigned MAX_TASKS_PER_VM = 3;
 
 
-// ---- Helper Functions ---- //
 MachineId_t FindBestMachine(TaskId_t task_id) {
    TaskInfo_t task_info = GetTaskInfo(task_id);
    MachineId_t best = -1;
    unsigned min_load = 1000;
 
-
-   // Look for powered-on machines first
    for (auto m_id : machines) {
        MachineInfo_t minfo = Machine_GetInfo(m_id);
        if (minfo.cpu != task_info.required_cpu) continue;
@@ -72,8 +67,6 @@ MachineId_t FindBestMachine(TaskId_t task_id) {
        }
    }
 
-
-   // If no powered-on machine, try waking up a compatible one
    if (best == -1) {
        for (auto m_id : machines) {
            MachineInfo_t minfo = Machine_GetInfo(m_id);
@@ -120,7 +113,6 @@ void AdjustMachinePerformance(MachineId_t m_id) {
 }
 
 
-// ---- Scheduler Methods ---- //
 void Scheduler::Init() {
    SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
    SimOutput("Scheduler::Init(): Initializing scheduler", 1);
@@ -132,24 +124,15 @@ void Scheduler::Init() {
    MachineInfo_t minfo = Machine_GetInfo(i);   
    MachineId_t m_id = MachineId_t(i);
 
-
-   // Skip machines that are powered-off (or you want to sleep)
-
-
-   // Create VM with matching CPU type
    VMType_t vm_type = LINUX;                   
    VMId_t vm_id = VM_Create(vm_type, minfo.cpu);
 
-
-   // Attach VM to machine (safe now)
    VM_Attach(vm_id, m_id);
 
 
    machines.push_back(m_id);
    vms.push_back(vm_id);
 
-
-   // Initialize machine and VM records
    machine_map[m_id] = {{vm_id}, true, minfo.cpu};
    vm_map[vm_id] = {{}, m_id};
 }
@@ -173,7 +156,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
    }
 
 
-   // Otherwise, create a new VM and attach to best machine
+   //  create new VM and attach to best machine
    MachineId_t m_id = FindBestMachine(task_id);
    if (m_id == -1) {
        ThrowException("No suitable machine for task " + std::to_string(task_id));
@@ -206,7 +189,7 @@ void Scheduler::PeriodicCheck(Time_t now) {
        AdjustMachinePerformance(m_id);
 
 
-   // Simple load balancing: migrate low-priority VM if machine overloaded
+   // migrate low-priority VM if machine overloaded
    for (auto m_id : machines) {
        MachineInfo_t info = Machine_GetInfo(m_id);
        if (!machine_map[m_id].powered_on || info.active_tasks <= info.num_cpus) continue;
@@ -240,13 +223,13 @@ void Scheduler::PeriodicCheck(Time_t now) {
 
 void Scheduler::Shutdown(Time_t time) {
    // Only shutdown VMs that are still active
-   for (auto it = vms.begin(); it != vms.end(); /*no increment here*/) {
+   for (auto it = vms.begin(); it != vms.end();) {
        VMId_t vm = *it;
        if (vm_map.find(vm) != vm_map.end()) {
            VM_Shutdown(vm);
-           it = vms.erase(it);  // remove from list
+           it = vms.erase(it);
        } else {
-           ++it; // already inactive, skip
+           ++it; 
        }
    }
    SimOutput("SimulationComplete(): Finished!", 4);
@@ -275,8 +258,6 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
    completed_tasks++;
    SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " complete at " + to_string(now), 4);
 }
-
-
 
 
 // Public interface below

@@ -2,6 +2,8 @@
 //  Scheduler.hpp
 //  CloudSim
 //
+//  Created by ELMOOTAZBELLAH ELNOZAHY on 10/20/24.
+//
 
 #ifndef Scheduler_hpp
 #define Scheduler_hpp
@@ -23,7 +25,6 @@ struct MachineKey {
 };
 struct MachineKeyHash {
     size_t operator()(const MachineKey& k) const noexcept {
-        // simple mixing of small enums + bool
         return (static_cast<size_t>(k.state) * 97u) ^
                (static_cast<size_t>(k.cpu)   * 31u) ^
                (k.gpu ? 0x9e3779b97f4a7c15ULL : 0ULL);
@@ -42,7 +43,7 @@ struct VirtualKey {
 };
 struct VirtualKeyHash {
     size_t operator()(const VirtualKey& k) const noexcept {
-        // mix 4 tiny fields; good enough for small buckets
+        //used ai for calculations 
         size_t h = static_cast<size_t>(k.vm);
         h = h * 131u ^ static_cast<size_t>(k.sla);
         h = h * 131u ^ static_cast<size_t>(k.cpu);
@@ -62,15 +63,14 @@ public:
     void TaskComplete(Time_t now, TaskId_t task_id);
 
 private:
-    // buckets
+    //buckets
     std::unordered_map<MachineKey, std::vector<MachineId_t>, MachineKeyHash> hostBuckets;
     std::unordered_map<VirtualKey, std::vector<VMId_t>,     VirtualKeyHash>  vmBuckets;
     std::unordered_map<VirtualKey, std::queue<TaskId_t>,    VirtualKeyHash>  queues;
 
-    // flat tracking (helpful for scans / shutdown)
     std::vector<MachineId_t> allMachines;
 
-    // helpers
+    //helpers
     static VMType_t defaultVM(CPUType_t cpu);
     static Priority_t prioFromSLA(SLAType_t sla);
     static bool canHostVM(const MachineInfo_t& mi, VMType_t vmType, CPUType_t vmCpu);

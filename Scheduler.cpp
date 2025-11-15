@@ -138,7 +138,7 @@ void Scheduler::Init() {
 }
 }
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
-   // VM is now free for new tasks
+   // Update your data structure. The VM now can receive new tasks
 }
 
 
@@ -146,7 +146,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
    Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
 
 
-   // Try to assign to existing VM first
+   //try to assign to existing VM first
    VMId_t vm_id = FindAvailableVM(task_id);
    if (vm_id != -1) {
        VM_AddTask(vm_id, task_id, priority);
@@ -156,7 +156,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
    }
 
 
-   //  create new VM and attach to best machine
+   //create new VM and attach to best machine
    MachineId_t m_id = FindBestMachine(task_id);
    if (m_id == -1) {
        ThrowException("No suitable machine for task " + std::to_string(task_id));
@@ -189,7 +189,7 @@ void Scheduler::PeriodicCheck(Time_t now) {
        AdjustMachinePerformance(m_id);
 
 
-   // migrate low-priority VM if machine overloaded
+   //migrate low-priority VM if machine overloaded
    for (auto m_id : machines) {
        MachineInfo_t info = Machine_GetInfo(m_id);
        if (!machine_map[m_id].powered_on || info.active_tasks <= info.num_cpus) continue;
@@ -222,7 +222,7 @@ void Scheduler::PeriodicCheck(Time_t now) {
 
 
 void Scheduler::Shutdown(Time_t time) {
-   // Only shutdown VMs that are still active
+   //only shutdown VMs that are still active
    for (auto it = vms.begin(); it != vms.end();) {
        VMId_t vm = *it;
        if (vm_map.find(vm) != vm_map.end()) {

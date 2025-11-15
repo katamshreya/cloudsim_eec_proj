@@ -67,8 +67,10 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
     else
         priority = LOW_PRIORITY;
 
-    static size_t vm_rr = 0;      // Round-robin pointer for VMs
-    static size_t machine_rr = 0; // Round-robin pointer for machines
+    //round-robin pointer for VMs
+    static size_t vm_rr = 0;
+    //round-robin pointer for machines
+    static size_t machine_rr = 0;
     VMId_t selected_vm = VMId_t(-1);
 
     unsigned total_vms = vms.size();
@@ -107,7 +109,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         if (available_memory < task_info.required_memory)
             continue;
 
-        // Check for existing VM on this machine
+        //check for existing VM on this machine
         bool found_vm = false;
         for (VMId_t vm_id : vms)
         {
@@ -121,7 +123,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
             }
         }
 
-        // Create VM if not found
+        //create VM if not found
         if (!found_vm)
         {
             selected_vm = VM_Create(task_info.required_vm, 
@@ -138,7 +140,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
         return;
     }
 
-    // Wake sleeping machine
+    //wake sleeping machine
     for (size_t i = 0; i < total_machines; ++i)
     {
         MachineId_t machine_id = MachineId_t((machine_rr + i) % total_machines);
